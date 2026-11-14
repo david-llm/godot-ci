@@ -26,3 +26,4 @@ jobs:
       godot-version: "4.7.2"
       # project-path: game        # if project.godot isn't at the repo root
       # export-preset: Web        # if your preset has a different name
+      # blender-version: "5.1.2"  # if the project contains .blend files

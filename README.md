@@ -20,8 +20,11 @@ Every push to `main` then builds and deploys to `https://david-llm.github.io/<re
 | `project-path` | `.` | Folder containing `project.godot` |
 | `export-preset` | `Web` | Name of the Web export preset |
 | `debug` | `false` | Use `--export-debug` |
+| `blender-version` | (empty) | Blender to install for importing `.blend` files, e.g. `5.1.2`. Must be able to read your files. |
 
 ## Notes
+
+- The build fails if any asset fails to import, so a broken build never replaces a working one.
 
 - Single-threaded exports (the default since Godot 4.3) need no special headers and run on Pages as is.
 - For Thread Support, turn on **Progressive Web App → Enable** and **Ensure Cross Origin Isolation Headers** in the game's export preset. GitHub Pages can't send COOP/COEP headers itself.

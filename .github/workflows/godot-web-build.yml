@@ -27,6 +27,10 @@ on:
         description: "Use --export-debug instead of --export-release"
         type: boolean
         default: false
+      blender-version:
+        description: "Blender version for importing .blend files, e.g. 5.1.2. Leave empty if the project has none."
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -66,10 +70,53 @@ jobs:
             -d "${TEMPLATE_DIR/#\~/$HOME}"
           rm /tmp/godot.zip /tmp/templates.tpz
 
+      # Only needed when the project contains .blend files: Godot imports them by running Blender.
+      # The Blender version must be able to read your files (Blender 5.x files need Blender 5.x).
+      - name: Cache Blender
+        id: cache-blender
+        if: inputs.blender-version != ''
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ inputs.blender-version }}
+
+      - name: Download Blender
+        if: inputs.blender-version != '' && steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          v="${{ inputs.blender-version }}"
+          series=$(echo "$v" | cut -d. -f1,2)
+          curl -fsSL "https://download.blender.org/release/Blender${series}/blender-${v}-linux-x64.tar.xz" \
+            | tar -xJ -C ~
+          mv ~/blender-${v}-linux-x64 ~/blender
+
+      - name: Configure Godot to use Blender
+        if: inputs.blender-version != ''
+        run: |
+          set -euo pipefail
+          # Libraries Blender needs to start in background mode.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 libgl1 libegl1
+          ~/blender/blender --version | head -1
+          # Godot can't set the Blender path in headless mode, so write it into the editor settings.
+          series=$(echo "${{ inputs.godot-version }}" | cut -d. -f1,2)
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nfilesystem/import/blender/blender_path = "%s"\n' \
+            "$HOME/blender/blender" > ~/.config/godot/editor_settings-${series}.tres
+
       - name: Import assets
         working-directory: ${{ inputs.project-path }}
-        # A fresh checkout has no .godot/ cache; importing first avoids missing-resource errors.
-        run: ~/godot/godot --headless --import || true
+        # A fresh checkout has no .godot/ cache, so import everything first.
+        # Godot exits 0 even when imports fail, so check the log; otherwise a build
+        # with missing assets would deploy without complaint.
+        run: |
+          set -uo pipefail
+          ~/godot/godot --headless --import 2>&1 | tee /tmp/import.log
+          if grep -E "Error importing|Failed loading resource|Blender path is invalid" /tmp/import.log; then
+            echo "::error::Some assets failed to import (see lines above)."
+            exit 1
+          fi
 
       - name: Export
         working-directory: ${{ inputs.project-path }}
