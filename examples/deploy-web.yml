@@ -1,0 +1,28 @@
+# Per-game workflow. Copy into each game repo at: .github/workflows/deploy-web.yml
+# Then in the game repo: Settings → Pages → Source: "GitHub Actions".
+
+name: Deploy web build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Reusable workflows can only use permissions the caller grants.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Don't let two deploys race; the newest push wins.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  web:
+    uses: david-llm/godot-ci/.github/workflows/godot-web-build.yml@main
+    with:
+      godot-version: "4.7.2"
+      # project-path: game        # if project.godot isn't at the repo root
+      # export-preset: Web        # if your preset has a different name

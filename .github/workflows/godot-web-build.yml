@@ -1,0 +1,96 @@
+# Reusable workflow: export a Godot project for the web and deploy it to GitHub Pages.
+# Lives in your central repo at: .github/workflows/godot-web-build.yml
+# Game repos call it with:  uses: david-llm/godot-ci/.github/workflows/godot-web-build.yml@main
+
+name: Godot web build
+
+on:
+  workflow_call:
+    inputs:
+      godot-version:
+        description: "Godot version, e.g. 4.7.2 (must match the editor you use)"
+        type: string
+        required: true
+      release-flavor:
+        description: "Release suffix: stable, rc1, beta2, ..."
+        type: string
+        default: stable
+      project-path:
+        description: "Folder containing project.godot, relative to the repo root"
+        type: string
+        default: "."
+      export-preset:
+        description: "Name of the Web preset in export_presets.cfg"
+        type: string
+        default: Web
+      debug:
+        description: "Use --export-debug instead of --export-release"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_TAG: ${{ inputs.godot-version }}-${{ inputs.release-flavor }}
+      TEMPLATE_DIR: ~/.local/share/godot/export_templates/${{ inputs.godot-version }}.${{ inputs.release-flavor }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      # Godot binary + web templates are ~1 GB to download, so cache them per version.
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_TAG }}-web
+
+      - name: Download Godot and web export templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_TAG}"
+          mkdir -p ~/godot "${TEMPLATE_DIR/#\~/$HOME}"
+
+          curl -fsSL -o /tmp/godot.zip "$base/Godot_v${GODOT_TAG}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_TAG}_linux.x86_64 ~/godot/godot
+
+          # The .tpz bundles every platform; keep only the web templates.
+          curl -fsSL -o /tmp/templates.tpz "$base/Godot_v${GODOT_TAG}_export_templates.tpz"
+          unzip -q -j /tmp/templates.tpz 'templates/web_*' 'templates/version.txt' \
+            -d "${TEMPLATE_DIR/#\~/$HOME}"
+          rm /tmp/godot.zip /tmp/templates.tpz
+
+      - name: Import assets
+        working-directory: ${{ inputs.project-path }}
+        # A fresh checkout has no .godot/ cache; importing first avoids missing-resource errors.
+        run: ~/godot/godot --headless --import || true
+
+      - name: Export
+        working-directory: ${{ inputs.project-path }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/build/web"
+          mode=${{ inputs.debug && '--export-debug' || '--export-release' }}
+          ~/godot/godot --headless $mode "${{ inputs.export-preset }}" \
+            "$GITHUB_WORKSPACE/build/web/index.html"
+          ls -lh "$GITHUB_WORKSPACE/build/web"
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
